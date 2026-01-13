@@ -190,8 +190,16 @@ export async function getGoogleOAuthClientForUser(userId: string) {
     );
 
   if (!account) {
+    console.error(`[GoogleAuth] No Google account found for user ${userId}`);
     throw new GoogleOAuthRequired(GoogleAuthErrorReason.NO_ACCOUNT);
   }
+
+  console.log(`[GoogleAuth] Found Google account for user ${userId}`, {
+    hasAccessToken: !!account.access_token,
+    hasRefreshToken: !!account.refresh_token,
+    expiresAt: account.expires_at ? new Date(account.expires_at * 1000).toISOString() : 'N/A',
+    scopes: account.scope?.split(' ').length ?? 0,
+  });
 
   function hasAllRequiredScopes(scope?: string | null) {
     if (!scope) return false;
@@ -201,6 +209,10 @@ export async function getGoogleOAuthClientForUser(userId: string) {
 
   // If required scopes are missing, force re-consent
   if (!hasAllRequiredScopes(account.scope)) {
+    console.error(`[GoogleAuth] Missing required scopes for user ${userId}`, {
+      grantedScopes: account.scope?.split(' ') ?? [],
+      requiredScopes: REQUIRED_SCOPES,
+    });
     throw new GoogleOAuthRequired(GoogleAuthErrorReason.MISSING_SCOPES);
   }
 
@@ -228,13 +240,24 @@ export async function getGoogleOAuthClientForUser(userId: string) {
 
   // If we need a refresh but have no refresh token, require reconnect
   if (needsRefresh && !account.refresh_token) {
+    console.error(`[GoogleAuth] Token expired and no refresh token available for user ${userId}`, {
+      accessTokenPresent: !!account.access_token,
+      expiryMs,
+      nowMs,
+      expired: expiryMs < nowMs,
+    });
     throw new GoogleOAuthRequired(GoogleAuthErrorReason.TOKEN_EXPIRED);
   }
 
   if (needsRefresh && account.refresh_token) {
+    console.log(`[GoogleAuth] Refreshing expired token for user ${userId}...`);
     try {
       // Use retry logic for transient failures
       const credentials = await refreshAccessTokenWithRetry(oauth2);
+      console.log(`[GoogleAuth] Token refresh successful for user ${userId}`, {
+        newExpiresAt: credentials.expiry_date ? new Date(credentials.expiry_date).toISOString() : 'N/A',
+        hasNewRefreshToken: !!credentials.refresh_token,
+      });
 
       // Persist updated tokens
       const newAccessToken = credentials.access_token ?? null;
@@ -292,6 +315,13 @@ export async function getGoogleOAuthClientForUser(userId: string) {
       // Classify error type
       if (errorCode === "invalid_grant") {
         // Most common: user revoked access, token expired, or security event
+        console.error(`[GoogleAuth] invalid_grant error for user ${userId}`, {
+          errorCode,
+          errorDescription,
+          statusCode,
+          message: error?.message,
+        });
+
         // Clear the refresh token since it's no longer valid
         await db
           .update(accounts)
@@ -311,7 +341,12 @@ export async function getGoogleOAuthClientForUser(userId: string) {
 
       if (errorCode === "invalid_client") {
         // Client credentials (app keys) are wrong
-        console.error("CRITICAL: Invalid OAuth client credentials");
+        console.error(`[GoogleAuth] CRITICAL: Invalid OAuth client credentials for user ${userId}`, {
+          errorCode,
+          errorDescription,
+          clientIdConfigured: !!env.AUTH_GOOGLE_ID,
+          clientSecretConfigured: !!env.AUTH_GOOGLE_SECRET,
+        });
         throw new GoogleOAuthRequired(
           GoogleAuthErrorReason.REFRESH_FAILED,
           "OAuth client configuration error",
@@ -335,6 +370,13 @@ export async function getGoogleOAuthClientForUser(userId: string) {
       }
 
       // Unknown error
+      console.error(`[GoogleAuth] Unknown token refresh error for user ${userId}`, {
+        errorCode,
+        errorDescription,
+        statusCode,
+        message: error?.message,
+      });
+
       throw new GoogleOAuthRequired(
         GoogleAuthErrorReason.REFRESH_FAILED,
         errorDescription ?? error?.message ?? "Failed to refresh access token",
@@ -342,6 +384,7 @@ export async function getGoogleOAuthClientForUser(userId: string) {
     }
   }
 
+  console.log(`[GoogleAuth] OAuth client ready for user ${userId}`);
   return oauth2;
 }
 
