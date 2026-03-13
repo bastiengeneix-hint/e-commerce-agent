@@ -1,7 +1,5 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { analyticsadmin_v1beta } from "googleapis";
-
 import {
   createTRPCRouter,
   protectedProcedure,
@@ -19,7 +17,7 @@ import { TRPCError } from "@trpc/server";
 import {
   GoogleOAuthRequired,
   GoogleAuthErrorReason,
-  getGoogleOAuthClientForUser,
+  getAnalyticsAdminClient,
 } from "@/server/google/client";
 import { handleGoogleOAuthError } from "@/server/api/errors";
 import {
@@ -221,13 +219,8 @@ export const googleAnalyticsRouter = createTRPCRouter({
     const userId = ctx.session.user.id;
 
     try {
-      // Try to get the OAuth client - this will attempt token refresh if needed
-      const client = await getGoogleOAuthClientForUser(userId);
-
-      // Make a lightweight API call to verify credentials
-      const analyticsAdmin = new analyticsadmin_v1beta.Analyticsadmin({
-        auth: client,
-      });
+      // Use shared client which applies Bearer token workaround
+      const analyticsAdmin = await getAnalyticsAdminClient(userId);
 
       // List account summaries is a lightweight call
       await analyticsAdmin.accountSummaries.list({ pageSize: 1 });

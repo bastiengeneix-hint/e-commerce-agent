@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
+import { toast } from "sonner";
 import { api } from "@/trpc/react";
 
 /**
@@ -45,6 +46,7 @@ export function useReconnectGoogle() {
 
     if (error) {
       console.error("OAuth error:", error);
+      toast.error("Google connection failed. Please try again.");
       return;
     }
 
@@ -78,7 +80,8 @@ export function useReconnectGoogle() {
               router.replace(url.pathname + url.search);
             }
 
-            // Success - break out of retry loop
+            // Success
+            toast.success("Google account reconnected successfully.");
             return;
           } catch {
             // Don't retry on the last attempt
@@ -91,7 +94,10 @@ export function useReconnectGoogle() {
           }
         }
 
-        // All attempts failed
+        // All attempts failed - notify user
+        toast.error(
+          "Failed to verify Google reconnection. Please try reconnecting again.",
+        );
         // Still invalidate queries - the connection might work on next manual attempt
         await utils.google_analytics.getConnectionStatus.invalidate();
       } finally {
